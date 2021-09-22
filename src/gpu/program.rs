@@ -21,7 +21,7 @@ use pairing::Engine;
 /// compile-time features.
 ///
 /// You cannot select CUDA if the library was compiled without support for it.
-#[allow(clippy::unnecessary-wraps)] // No error can be returned if `cuda` and `opencl `are enabled.
+#[allow(clippy::unnecessary_wraps)] // No error can be returned if `cuda` and `opencl `are enabled.
 fn select_framework(default_framework: Framework) -> GPUResult<Framework> {
     match env::var("BELLMAN_GPU_FRAMEWORK") {
         Ok(env) => match env.as_ref() {
