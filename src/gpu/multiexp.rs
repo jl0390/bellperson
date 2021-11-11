@@ -137,6 +137,8 @@ where
         let num_groups = calc_num_groups(self.core_count, num_windows);
         let bucket_len = 1 << window_size;
 
+        //info!("multiexp size={} win={} grou={} bucket={} corecount={}", window_size, num_windows, num_groups, bucket_len, self.core_count);
+
         // Each group will have `num_windows` threads and as there are `num_groups` groups, there will
         // be `num_groups` * `num_windows` threads in total.
         // Each thread will use `num_groups` * `num_windows` * `bucket_len` buckets.
@@ -161,6 +163,7 @@ where
                 // `LOCAL_WORK_SIZE` sized thread groups.
                 let global_work_size =
                     (num_windows * num_groups + LOCAL_WORK_SIZE - 1) / LOCAL_WORK_SIZE;
+                let lock = locks::GPULock::lock();
 
                 let kernel = program.create_kernel(
                     if TypeId::of::<G>() == TypeId::of::<E::G1Affine>() {
@@ -220,7 +223,7 @@ where
     E: Engine + GpuEngine,
 {
     kernels: Vec<SingleMultiexpKernel<E>>,
-    _lock: locks::GPULock, // RFC 1857: struct fields are dropped in the same order as they are declared.
+    //_lock: locks::GPULock, // RFC 1857: struct fields are dropped in the same order as they are declared.
 }
 
 impl<E> MultiexpKernel<E>
@@ -228,7 +231,7 @@ where
     E: Engine + GpuEngine,
 {
     pub fn create(priority: bool) -> GPUResult<MultiexpKernel<E>> {
-        let lock = locks::GPULock::lock();
+        //let lock = locks::GPULock::lock();
 
         let kernels: Vec<_> = Device::all()
             .iter()
@@ -263,7 +266,7 @@ where
         }
         Ok(MultiexpKernel::<E> {
             kernels,
-            _lock: lock,
+            //_lock: lock,
         })
     }
 

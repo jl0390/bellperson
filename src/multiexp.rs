@@ -362,6 +362,8 @@ where
     E: Engine<Fr = G::Scalar>,
     S: SourceBuilder<G>,
 {
+    info!("call multiexp");
+
     if let Some(ref mut kern) = kern {
         if let Ok(p) = kern.with(|k: &mut gpu::MultiexpKernel<E>| {
             let exps = density_map.as_ref().generate_exps::<E>(exponents.clone());

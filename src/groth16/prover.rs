@@ -265,6 +265,11 @@ where
     let aux_assignment_len = provers[0].aux_assignment.len();
     let num_circuits = provers.len();
 
+        info!(" paramerters input_len={} vk=.. n={} a_aux_density_total={} b_input_density_total={} b_aux_density_total={} aux_assignment_len={} num_circuits={}",
+        input_len, n, a_aux_density_total, b_input_density_total, b_aux_density_total, aux_assignment_len, num_circuits);
+
+
+
     // Make sure all circuits have the same input len.
     for prover in &provers {
         assert_eq!(
@@ -317,6 +322,7 @@ where
 
         let mut fft_kern = Some(LockedFFTKernel::<E>::new(log_d, priority));
         for prover in provers_ref {
+            info!("call fft");
             a_s.push(execute_fft(worker, prover, &mut fft_kern)?);
         }
         Ok(())
