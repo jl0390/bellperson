@@ -34,7 +34,7 @@ impl Drop for GPULock {
         debug!("GPU lock released!");
     }
 }
-/// `FFTLock` prevents two kernel objects to be instantiated simultaneously.
+/// `FFTLock` prevents two fft kernel objects to be instantiated simultaneously.
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug)]
 pub struct FFTLock(File);

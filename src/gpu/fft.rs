@@ -125,7 +125,7 @@ where
 {
     kernels: Vec<SingleFftKernel<E>>,
     //_lock: locks::GPULock, // RFC 1857: struct fields are dropped in the same order as they are declared.
-    _lock:locks::FFTLock,
+    _lock: locks::FFTLock,
 }
 
 impl<E> FFTKernel<E>
@@ -134,7 +134,7 @@ where
 {
     pub fn create(priority: bool) -> GPUResult<FFTKernel<E>> {
         //let lock = locks::GPULock::lock();
-        let lock = locks::FFTLock:lock();
+        let lock = locks::FFTLock::lock();
 
         let kernels: Vec<_> = Device::all()
             .iter()
