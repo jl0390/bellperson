@@ -4,6 +4,8 @@ use std::fs::File;
 use std::path::PathBuf;
 
 const GPU_LOCK_NAME: &str = "bellman.gpu.lock";
+const FFT_LOCK_NAME: &str = "bellman.fft.lock";
+
 const PRIORITY_LOCK_NAME: &str = "bellman.priority.lock";
 fn tmp_path(filename: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
@@ -30,6 +32,27 @@ impl Drop for GPULock {
     fn drop(&mut self) {
         self.0.unlock().unwrap();
         debug!("GPU lock released!");
+    }
+}
+/// `FFTLock` prevents two kernel objects to be instantiated simultaneously.
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Debug)]
+pub struct FFTLock(File);
+impl FFTLock {
+    pub fn lock() -> FFTLock {
+        let fft_lock_file = tmp_path(FFT_LOCK_NAME);
+        debug!("Acquiring FFT lock at {:?} ...", &fft_lock_file);
+        let f = File::create(&fft_lock_file)
+            .unwrap_or_else(|_| panic!("Cannot create FFT lock file at {:?}", &fft_lock_file));
+        f.lock_exclusive().unwrap();
+        debug!("FFT lock acquired!");
+        FFTLock(f)
+    }
+}
+impl Drop for FFTLock {
+    fn drop(&mut self) {
+        self.0.unlock().unwrap();
+        debug!("FFT lock released!");
     }
 }
 

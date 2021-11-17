@@ -75,7 +75,7 @@ impl<E: Engine + GpuEngine> SingleFftKernel<E> {
             program.write_from_buffer(&mut src_buffer, &*input)?;
             // Specifies log2 of `p`, (http://www.bealto.com/gpu-fft_group-1.html)
             let mut log_p = 0u32;
-            let lock = locks::GPULock::lock();
+            let glock = locks::GPULock::lock();
             // Each iteration performs a FFT round
             while log_p < log_n {
                 // 1=>radix2, 2=>radix4, 3=>radix8, ...
@@ -125,6 +125,7 @@ where
 {
     kernels: Vec<SingleFftKernel<E>>,
     //_lock: locks::GPULock, // RFC 1857: struct fields are dropped in the same order as they are declared.
+    _lock:locks::FFTLock,
 }
 
 impl<E> FFTKernel<E>
@@ -133,6 +134,7 @@ where
 {
     pub fn create(priority: bool) -> GPUResult<FFTKernel<E>> {
         //let lock = locks::GPULock::lock();
+        let lock = locks::FFTLock:lock();
 
         let kernels: Vec<_> = Device::all()
             .iter()
@@ -159,7 +161,7 @@ where
 
         Ok(FFTKernel {
             kernels,
-           // _lock: lock,
+            _lock: lock,
         })
     }
 
