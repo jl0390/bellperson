@@ -12,12 +12,15 @@ fn tmp_path(filename: &str) -> PathBuf {
 }
 
 /// `GPULock` prevents two kernel objects to be instantiated simultaneously.
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug)]
 pub struct GPULock(File);
 impl GPULock {
     pub fn lock() -> GPULock {
-        debug!("Acquiring GPU lock...");
-        let f = File::create(tmp_path(GPU_LOCK_NAME)).unwrap();
+        let gpu_lock_file = tmp_path(GPU_LOCK_NAME);
+        debug!("Acquiring GPU lock at {:?} ...", &gpu_lock_file);
+        let f = File::create(&gpu_lock_file)
+            .unwrap_or_else(|_| panic!("Cannot create GPU lock file at {:?}", &gpu_lock_file));
         f.lock_exclusive().unwrap();
         debug!("GPU lock acquired!");
         GPULock(f)
@@ -25,6 +28,7 @@ impl GPULock {
 }
 impl Drop for GPULock {
     fn drop(&mut self) {
+        self.0.unlock().unwrap();
         debug!("GPU lock released!");
     }
 }
@@ -37,30 +41,52 @@ impl Drop for GPULock {
 pub struct PriorityLock(File);
 impl PriorityLock {
     pub fn lock() -> PriorityLock {
-        debug!("Acquiring priority lock...");
-        let f = File::create(tmp_path(PRIORITY_LOCK_NAME)).unwrap();
+        let priority_lock_file = tmp_path(PRIORITY_LOCK_NAME);
+        debug!("Acquiring priority lock at {:?} ...", &priority_lock_file);
+        let f = File::create(&priority_lock_file).unwrap_or_else(|_| {
+            panic!(
+                "Cannot create priority lock file at {:?}",
+                &priority_lock_file
+            )
+        });
         f.lock_exclusive().unwrap();
         debug!("Priority lock acquired!");
         PriorityLock(f)
     }
+
     pub fn wait(priority: bool) {
         if !priority {
-            File::create(tmp_path(PRIORITY_LOCK_NAME))
+            if let Err(err) = File::create(tmp_path(PRIORITY_LOCK_NAME))
                 .unwrap()
                 .lock_exclusive()
-                .unwrap();
+            {
+                warn!("failed to create priority log: {:?}", err);
+            }
         }
     }
+
     pub fn should_break(priority: bool) -> bool {
-        !priority
-            && File::create(tmp_path(PRIORITY_LOCK_NAME))
-                .unwrap()
-                .try_lock_exclusive()
-                .is_err()
+        if priority {
+            return false;
+        }
+        if let Err(err) = File::create(tmp_path(PRIORITY_LOCK_NAME))
+            .unwrap()
+            .try_lock_shared()
+        {
+            // Check that the error is actually a locking one
+            if err.raw_os_error() == fs2::lock_contended_error().raw_os_error() {
+                return true;
+            } else {
+                warn!("failed to check lock: {:?}", err);
+            }
+        }
+        false
     }
 }
+
 impl Drop for PriorityLock {
     fn drop(&mut self) {
+        self.0.unlock().unwrap();
         debug!("Priority lock released!");
     }
 }
@@ -74,6 +100,7 @@ use crate::multiexp::create_multiexp_kernel;
 
 macro_rules! locked_kernel {
     ($class:ident, $kern:ident, $func:ident, $name:expr) => {
+        #[allow(clippy::upper_case_acronyms)]
         pub struct $class<E>
         where
             E: Engine,
@@ -116,6 +143,10 @@ macro_rules! locked_kernel {
             where
                 F: FnMut(&mut $kern<E>) -> GPUResult<R>,
             {
+                if std::env::var("BELLMAN_NO_GPU").is_ok() {
+                    return Err(GPUError::GPUDisabled);
+                }
+
                 self.init();
 
                 loop {

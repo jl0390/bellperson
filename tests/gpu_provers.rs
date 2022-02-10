@@ -49,7 +49,7 @@ pub fn test_parallel_prover() {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    env_logger::init();
+    let _ = env_logger::try_init();
     let rng = &mut thread_rng();
 
     println!("Initializing circuit...");
@@ -57,11 +57,17 @@ pub fn test_parallel_prover() {
 
     // Higher prio circuit
     let c = DummyDemo {
+        #[cfg(not(feature = "_coverage"))]
         interations: 10_000,
+        #[cfg(feature = "_coverage")]
+        interations: 100,
     };
     // Lower prio circuit
     let c2 = DummyDemo {
+        #[cfg(not(feature = "_coverage"))]
         interations: 500_000,
+        #[cfg(feature = "_coverage")]
+        interations: 5000,
     };
 
     let params = generate_random_parameters::<Bls12, _, _>(c.clone(), rng).unwrap();
@@ -82,7 +88,7 @@ pub fn test_parallel_prover() {
             println!(
                 "Higher proof gen finished in {}s and {}ms",
                 now.elapsed().as_secs(),
-                now.elapsed().subsec_nanos() / 1000000
+                now.elapsed().subsec_millis()
             );
 
             // Sleep in between higher proofs so that LOWER thread can acquire GPU again
@@ -103,7 +109,7 @@ pub fn test_parallel_prover() {
             println!(
                 "Lower proof gen finished in {}s and {}ms",
                 now.elapsed().as_secs(),
-                now.elapsed().subsec_nanos() / 1000000
+                now.elapsed().subsec_millis()
             );
         }
     }

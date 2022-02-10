@@ -89,7 +89,7 @@ impl<E: Engine, G: Group<E>> EvaluationDomain<E, G> {
         worker: &Worker,
         kern: &mut Option<gpu::LockedFFTKernel<E>>,
     ) -> gpu::GPUResult<()> {
-        best_fft(kern, &mut self.coeffs, worker, &self.omega, self.exp)?;
+        best_fft(kern, &mut self.coeffs, worker, &self.omega, self.exp);
         Ok(())
     }
 
@@ -98,13 +98,13 @@ impl<E: Engine, G: Group<E>> EvaluationDomain<E, G> {
         worker: &Worker,
         kern: &mut Option<gpu::LockedFFTKernel<E>>,
     ) -> gpu::GPUResult<()> {
-        best_fft(kern, &mut self.coeffs, worker, &self.omegainv, self.exp)?;
+        best_fft(kern, &mut self.coeffs, worker, &self.omegainv, self.exp);
 
         worker.scope(self.coeffs.len(), |scope, chunk| {
             let minv = self.minv;
 
             for v in self.coeffs.chunks_mut(chunk) {
-                scope.spawn(move |_| {
+                scope.execute(move || {
                     for v in v {
                         v.group_mul_assign(&minv);
                     }
@@ -118,7 +118,7 @@ impl<E: Engine, G: Group<E>> EvaluationDomain<E, G> {
     pub fn distribute_powers(&mut self, worker: &Worker, g: E::Fr) {
         worker.scope(self.coeffs.len(), |scope, chunk| {
             for (i, v) in self.coeffs.chunks_mut(chunk).enumerate() {
-                scope.spawn(move |_| {
+                scope.execute(move || {
                     let mut u = g.pow(&[(i * chunk) as u64]);
                     for v in v.iter_mut() {
                         v.group_mul_assign(&u);
@@ -170,7 +170,7 @@ impl<E: Engine, G: Group<E>> EvaluationDomain<E, G> {
 
         worker.scope(self.coeffs.len(), |scope, chunk| {
             for v in self.coeffs.chunks_mut(chunk) {
-                scope.spawn(move |_| {
+                scope.execute(move || {
                     for v in v {
                         v.group_mul_assign(&i);
                     }
@@ -189,7 +189,7 @@ impl<E: Engine, G: Group<E>> EvaluationDomain<E, G> {
                 .chunks_mut(chunk)
                 .zip(other.coeffs.chunks(chunk))
             {
-                scope.spawn(move |_| {
+                scope.execute(move || {
                     for (a, b) in a.iter_mut().zip(b.iter()) {
                         a.group_mul_assign(&b.0);
                     }
@@ -208,7 +208,7 @@ impl<E: Engine, G: Group<E>> EvaluationDomain<E, G> {
                 .chunks_mut(chunk)
                 .zip(other.coeffs.chunks(chunk))
             {
-                scope.spawn(move |_| {
+                scope.execute(move || {
                     for (a, b) in a.iter_mut().zip(b.iter()) {
                         a.group_sub_assign(&b);
                     }
@@ -293,13 +293,13 @@ fn best_fft<E: Engine, T: Group<E>>(
     worker: &Worker,
     omega: &E::Fr,
     log_n: u32,
-) -> gpu::GPUResult<()> {
+) {
     if let Some(ref mut kern) = kern {
         if kern
             .with(|k: &mut gpu::FFTKernel<E>| gpu_fft(k, a, omega, log_n))
             .is_ok()
         {
-            return Ok(());
+            return;
         }
     }
 
@@ -309,8 +309,6 @@ fn best_fft<E: Engine, T: Group<E>>(
     } else {
         parallel_fft(a, worker, omega, log_n, log_cpus);
     }
-
-    Ok(())
 }
 
 pub fn gpu_fft<E: Engine, T: Group<E>>(
@@ -326,11 +324,12 @@ pub fn gpu_fft<E: Engine, T: Group<E>>(
     // size.
     // For compatibility/performance reasons we decided to transmute the array to the desired type
     // as it seems safe and needs less modifications in the current structure of Bellman library.
-    let a = unsafe { std::mem::transmute::<&mut [T], &mut [E::Fr]>(a) };
+    let a = unsafe { &mut *(a as *mut [T] as *mut [E::Fr]) };
     kern.radix_fft(a, omega, log_n)?;
     Ok(())
 }
 
+#[allow(clippy::many_single_char_names)]
 pub fn serial_fft<E: ScalarEngine, T: Group<E>>(a: &mut [T], omega: &E::Fr, log_n: u32) {
     fn bitreverse(mut n: u32, l: u32) -> u32 {
         let mut r = 0;
@@ -393,7 +392,7 @@ fn parallel_fft<E: ScalarEngine, T: Group<E>>(
         let a = &*a;
 
         for (j, tmp) in tmp.iter_mut().enumerate() {
-            scope.spawn(move |_scope| {
+            scope.execute(move || {
                 // Shuffle into a sub-FFT
                 let omega_j = omega.pow(&[j as u64]);
                 let omega_step = omega.pow(&[(j as u64) << log_new_n]);
@@ -421,7 +420,7 @@ fn parallel_fft<E: ScalarEngine, T: Group<E>>(
         let tmp = &tmp;
 
         for (idx, a) in a.chunks_mut(chunk).enumerate() {
-            scope.spawn(move |_scope| {
+            scope.execute(move || {
                 let mut idx = idx * chunk;
                 let mask = (1 << log_cpus) - 1;
                 for a in a {
@@ -559,11 +558,11 @@ fn parallel_fft_consistency() {
     test_consistency::<Bls12, _>(rng);
 }
 
-pub fn create_fft_kernel<E>(log_d: usize, priority: bool) -> Option<gpu::FFTKernel<E>>
+pub fn create_fft_kernel<E>(_log_d: usize, priority: bool) -> Option<gpu::FFTKernel<E>>
 where
     E: Engine,
 {
-    match gpu::FFTKernel::create(1 << log_d, priority) {
+    match gpu::FFTKernel::create(priority) {
         Ok(k) => {
             info!("GPU FFT kernel instantiated!");
             Some(k)
@@ -588,14 +587,15 @@ mod tests {
     #[test]
     pub fn gpu_fft_consistency() {
         let _ = env_logger::try_init();
+        gpu::dump_device_list();
 
         let rng = &mut rand::thread_rng();
 
         let worker = Worker::new();
         let log_cpus = worker.log_num_cpus();
-        let mut kern = gpu::FFTKernel::create(1 << 24, false).expect("Cannot initialize kernel!");
+        let mut kern = gpu::FFTKernel::create(false).expect("Cannot initialize kernel!");
 
-        for log_d in 1..25 {
+        for log_d in 1..=20 {
             let d = 1 << log_d;
 
             let elems = (0..d)
@@ -608,8 +608,7 @@ mod tests {
 
             let mut now = Instant::now();
             gpu_fft(&mut kern, &mut v1.coeffs, &v1.omega, log_d).expect("GPU FFT failed!");
-            let gpu_dur =
-                now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+            let gpu_dur = now.elapsed().as_secs() * 1000 + now.elapsed().subsec_millis() as u64;
             println!("GPU took {}ms.", gpu_dur);
 
             now = Instant::now();
@@ -618,8 +617,7 @@ mod tests {
             } else {
                 parallel_fft(&mut v2.coeffs, &worker, &v2.omega, log_d, log_cpus);
             }
-            let cpu_dur =
-                now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+            let cpu_dur = now.elapsed().as_secs() * 1000 + now.elapsed().subsec_millis() as u64;
             println!("CPU ({} cores) took {}ms.", 1 << log_cpus, cpu_dur);
 
             println!("Speedup: x{}", cpu_dur as f32 / gpu_dur as f32);

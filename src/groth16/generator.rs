@@ -177,6 +177,7 @@ impl<E: Engine> ConstraintSystem<E> for KeypairAssembly<E> {
 }
 
 /// Create parameters for a circuit, given some toxic waste.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_parameters<E, C>(
     circuit: C,
     g1: E::G1,
@@ -241,7 +242,7 @@ where
             let powers_of_tau = powers_of_tau.as_mut();
             worker.scope(powers_of_tau.len(), |scope, chunk| {
                 for (i, powers_of_tau) in powers_of_tau.chunks_mut(chunk).enumerate() {
-                    scope.spawn(move |_scope| {
+                    scope.execute(move || {
                         let mut current_tau_power = tau.pow(&[(i * chunk) as u64]);
 
                         for p in powers_of_tau {
@@ -265,7 +266,7 @@ where
             {
                 let mut g1_wnaf = g1_wnaf.shared();
 
-                scope.spawn(move |_scope| {
+                scope.execute(move || {
                     // Set values of the H query to g1^{(tau^i * t(tau)) / delta}
                     for (h, p) in h.iter_mut().zip(p.iter()) {
                         // Compute final exponent
@@ -293,6 +294,7 @@ where
     let mut ic = vec![E::G1::zero(); assembly.num_inputs];
     let mut l = vec![E::G1::zero(); assembly.num_aux];
 
+    #[allow(clippy::too_many_arguments)]
     fn eval<E: Engine>(
         // wNAF window tables
         g1_wnaf: &Wnaf<usize, &[E::G1], &mut Vec<i64>>,
@@ -344,7 +346,7 @@ where
                 let mut g1_wnaf = g1_wnaf.shared();
                 let mut g2_wnaf = g2_wnaf.shared();
 
-                scope.spawn(move |_scope| {
+                scope.execute(move || {
                     for ((((((a, b_g1), b_g2), ext), at), bt), ct) in a
                         .iter_mut()
                         .zip(b_g1.iter_mut())

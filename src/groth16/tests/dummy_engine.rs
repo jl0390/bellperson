@@ -12,7 +12,7 @@ use std::num::Wrapping;
 
 const MODULUS_R: Wrapping<u32> = Wrapping(64513);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Fr(Wrapping<u32>);
 
 impl fmt::Display for Fr {
@@ -90,6 +90,7 @@ impl SqrtField for Fr {
         }
     }
 
+    #[allow(clippy::many_single_char_names)]
     fn sqrt(&self) -> Option<Self> {
         // Tonelli-Shank's algorithm for q mod 16 = 1
         // https://eprint.iacr.org/2012/685.pdf (page 12, algorithm 5)
@@ -133,7 +134,7 @@ impl SqrtField for Fr {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FrRepr([u64; 1]);
 
 impl Ord for FrRepr {
@@ -247,6 +248,10 @@ impl PrimeField for Fr {
     fn root_of_unity() -> Fr {
         Fr(Wrapping(57751))
     }
+
+    fn from_random_bytes(_bytes: &[u8]) -> Option<Self> {
+        todo!()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -254,6 +259,16 @@ pub struct DummyEngine;
 
 impl ScalarEngine for DummyEngine {
     type Fr = Fr;
+}
+
+impl crate::bls::Compress for Fr {
+    fn write_compressed<W: std::io::Write>(self, _out: W) -> std::io::Result<()> {
+        unimplemented!()
+    }
+
+    fn read_compressed<R: std::io::Read>(_source: R) -> std::io::Result<Self> {
+        unimplemented!()
+    }
 }
 
 impl Engine for DummyEngine {
@@ -363,6 +378,7 @@ impl CurveProjective for Fr {
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub struct FakePoint;
 
+#[allow(clippy::derive_hash_xor_eq)]
 impl std::hash::Hash for FakePoint {
     fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {
         unimplemented!()

@@ -5,31 +5,28 @@
 //!
 //! [`CpuPool`]: futures_cpupool::CpuPool
 
-use crossbeam_channel::{bounded, Receiver};
-use lazy_static::lazy_static;
 use std::env;
 
+use crossbeam_channel::{bounded, Receiver};
+use lazy_static::lazy_static;
+use yastl::Pool;
+
+const MAX_VERIFIER_THREADS: usize = 6;
+
 lazy_static! {
-    static ref NUM_CPUS: usize = if let Ok(num) = env::var("BELLMAN_NUM_CPUS") {
-        if let Ok(num) = num.parse() {
-            num
-        } else {
-            num_cpus::get()
-        }
-    } else {
-        num_cpus::get()
-    };
-    pub static ref THREAD_POOL: rayon::ThreadPool = rayon::ThreadPoolBuilder::new()
+    static ref NUM_CPUS: usize = env::var("BELLMAN_NUM_CPUS")
+        .ok()
+        .and_then(|num| num.parse().ok())
+        .unwrap_or_else(num_cpus::get);
+    pub static ref THREAD_POOL: Pool = Pool::new(*NUM_CPUS);
+    pub static ref VERIFIER_POOL: Pool = Pool::new(NUM_CPUS.max(MAX_VERIFIER_THREADS));
+    pub static ref RAYON_THREAD_POOL: rayon::ThreadPool = rayon::ThreadPoolBuilder::new()
         .num_threads(*NUM_CPUS)
         .build()
-        .unwrap();
-    pub static ref VERIFIER_POOL: rayon::ThreadPool = rayon::ThreadPoolBuilder::new()
-        .num_threads(NUM_CPUS.max(6))
-        .build()
-        .unwrap();
+        .expect("failed to build rayon threadpool");
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Worker {}
 
 impl Worker {
@@ -47,6 +44,7 @@ impl Worker {
         R: Send + 'static,
     {
         let (sender, receiver) = bounded(1);
+
         THREAD_POOL.spawn(move || {
             let res = f();
             sender.send(res).unwrap();
@@ -57,8 +55,7 @@ impl Worker {
 
     pub fn scope<'a, F, R>(&self, elements: usize, f: F) -> R
     where
-        F: FnOnce(&rayon::Scope<'a>, usize) -> R + Send,
-        R: Send,
+        F: FnOnce(&yastl::Scope<'a>, usize) -> R,
     {
         let chunk_size = if elements < *NUM_CPUS {
             1
@@ -66,7 +63,21 @@ impl Worker {
             elements / *NUM_CPUS
         };
 
-        THREAD_POOL.scope(|scope| f(scope, chunk_size))
+        THREAD_POOL.scoped(|scope| f(scope, chunk_size))
+    }
+
+    /// Executes the passed in function, and returns the result once it is finished.
+    pub fn scoped<'a, F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&yastl::Scope<'a>) -> R,
+    {
+        let (sender, receiver) = bounded(1);
+        THREAD_POOL.scoped(|s| {
+            let res = f(s);
+            sender.send(res).unwrap();
+        });
+
+        receiver.recv().unwrap()
     }
 }
 
@@ -107,7 +118,6 @@ mod tests {
     #[test]
     fn test_log2_floor() {
         assert_eq!(log2_floor(1), 0);
-        assert_eq!(log2_floor(2), 1);
         assert_eq!(log2_floor(3), 1);
         assert_eq!(log2_floor(4), 2);
         assert_eq!(log2_floor(5), 2);

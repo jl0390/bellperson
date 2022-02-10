@@ -1,11 +1,12 @@
+use std::io;
+use std::iter;
+use std::sync::Arc;
+
 use bit_vec::{self, BitVec};
 use ff::{Field, PrimeField, PrimeFieldRepr, ScalarEngine};
 use groupy::{CurveAffine, CurveProjective};
 use log::{info, warn};
 use rayon::prelude::*;
-use std::io;
-use std::iter;
-use std::sync::Arc;
 
 use super::multicore::{Waiter, Worker};
 use super::SynthesisError;
@@ -15,6 +16,7 @@ use crate::gpu;
 pub trait SourceBuilder<G: CurveAffine>: Send + Sync + 'static + Clone {
     type Source: Source<G>;
 
+    #[allow(clippy::wrong_self_convention)]
     fn new(self) -> Self::Source;
     fn get(self) -> (Arc<Vec<G>>, usize);
 }
@@ -111,7 +113,7 @@ impl<'a> QueryDensity for &'a FullDensity {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct DensityTracker {
     pub bv: BitVec,
     pub total_density: usize,
@@ -310,7 +312,7 @@ where
             }
 
             let (bss, skip) = bases.clone().get();
-            k.multiexp(pool, bss, Arc::new(exps.clone()), skip, n)
+            k.multiexp(pool, bss, Arc::new(exps), skip, n)
         }) {
             return Waiter::done(Ok(p));
         }
@@ -328,8 +330,8 @@ where
         assert!(query_size == exponents.len());
     }
 
+    #[allow(clippy::let_and_return)]
     let result = pool.compute(move || multiexp_inner(bases, density_map, exponents, c));
-
     #[cfg(feature = "gpu")]
     {
         // Do not give the control back to the caller till the
@@ -361,7 +363,6 @@ fn test_with_bls12() {
     }
 
     use crate::bls::{Bls12, Engine};
-    use rand;
 
     const SAMPLES: usize = 1 << 14;
 
@@ -415,7 +416,10 @@ pub fn gpu_multiexp_consistency() {
     use crate::bls::Bls12;
     use std::time::Instant;
 
-    const MAX_LOG_D: usize = 20;
+    let _ = env_logger::try_init();
+    gpu::dump_device_list();
+
+    const MAX_LOG_D: usize = 16;
     const START_LOG_D: usize = 10;
     let mut kern = Some(gpu::LockedMultiexpKernel::<Bls12>::new(MAX_LOG_D, false));
     let pool = Worker::new();
@@ -425,11 +429,8 @@ pub fn gpu_multiexp_consistency() {
     let mut bases = (0..(1 << 10))
         .map(|_| <Bls12 as crate::bls::Engine>::G1::random(rng).into_affine())
         .collect::<Vec<_>>();
-    for _ in 10..START_LOG_D {
-        bases = [bases.clone(), bases.clone()].concat();
-    }
 
-    for log_d in START_LOG_D..(MAX_LOG_D + 1) {
+    for log_d in START_LOG_D..=MAX_LOG_D {
         let g = Arc::new(bases.clone());
 
         let samples = 1 << log_d;
@@ -445,14 +446,14 @@ pub fn gpu_multiexp_consistency() {
         let gpu = multiexp(&pool, (g.clone(), 0), FullDensity, v.clone(), &mut kern)
             .wait()
             .unwrap();
-        let gpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+        let gpu_dur = now.elapsed().as_secs() * 1000 + now.elapsed().subsec_millis() as u64;
         println!("GPU took {}ms.", gpu_dur);
 
         now = Instant::now();
         let cpu = multiexp(&pool, (g.clone(), 0), FullDensity, v.clone(), &mut None)
             .wait()
             .unwrap();
-        let cpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+        let cpu_dur = now.elapsed().as_secs() * 1000 + now.elapsed().subsec_millis() as u64;
         println!("CPU took {}ms.", cpu_dur);
 
         println!("Speedup: x{}", cpu_dur as f32 / gpu_dur as f32);
